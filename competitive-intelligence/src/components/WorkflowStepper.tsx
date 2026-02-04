@@ -29,6 +29,10 @@ export default function WorkflowStepper() {
             key={step.number}
             className={`stepper-step ${state.currentStep === step.number ? 'active' : ''} ${state.currentStep > step.number ? 'completed' : ''} phase-${step.phase}`}
             onClick={() => goToStep(step.number)}
+            title={`Go to Step ${step.number}: ${step.title}`}
+            role="button"
+            tabIndex={0}
+            onKeyPress={(e) => e.key === 'Enter' && goToStep(step.number)}
           >
             <div className="step-circle">
               {state.currentStep > step.number ? (
@@ -46,6 +50,8 @@ export default function WorkflowStepper() {
           </div>
         ))}
       </div>
+
+      <p className="stepper-hint">Click any step above to navigate</p>
     </div>
   );
 }

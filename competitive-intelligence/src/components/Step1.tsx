@@ -341,7 +341,10 @@ export default function Step1() {
       </div>
 
       <div className="step-actions">
-        <button className="btn-primary" onClick={nextStep} disabled={!hasResearchData}>
+        <button className="btn-secondary" onClick={nextStep}>
+          Skip to Step 2 &rarr;
+        </button>
+        <button className="btn-primary" onClick={nextStep}>
           Continue to Step 2 &rarr;
         </button>
       </div>
