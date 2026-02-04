@@ -5,3 +5,4 @@ export { default as Step4 } from './Step4';
 export { default as Step5 } from './Step5';
 export { default as Step6 } from './Step6';
 export { default as WorkflowStepper } from './WorkflowStepper';
+export { default as APISettings } from './APISettings';
