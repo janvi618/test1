@@ -1,32 +1,98 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useWorkflow } from '../context/WorkflowContext';
 import { STEPS_INFO } from '../types/workflow';
+import {
+  loadAPISettings,
+  type APISettings,
+} from '../services/aiResearch';
 
 export default function Step2() {
   const { state, updateStep2, nextStep, prevStep } = useWorkflow();
   const stepInfo = STEPS_INFO[1];
-  const [newWhitespace, setNewWhitespace] = useState('');
-  const [newPriority, setNewPriority] = useState('');
 
-  const addToList = (
-    list: string[],
-    value: string,
-    setter: (v: string) => void,
-    updateKey: 'innovationWhitespace' | 'priorityAreas'
-  ) => {
-    if (value.trim()) {
-      updateStep2({ [updateKey]: [...list, value.trim()] });
-      setter('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Combine all items from Step 1 for selection
+  const step1Items = [
+    ...state.step1.technicalLevers.map(item => ({ type: 'Technical Lever', value: item })),
+    ...state.step1.ipWhitespace.map(item => ({ type: 'IP Whitespace', value: item })),
+    ...state.step1.consumerTrends.map(item => ({ type: 'Consumer Trend', value: item })),
+  ];
+
+  const isSelected = (item: string) => state.step2.priorityAreas.includes(item);
+
+  const toggleSelection = (item: string) => {
+    if (isSelected(item)) {
+      updateStep2({
+        priorityAreas: state.step2.priorityAreas.filter(i => i !== item)
+      });
+    } else {
+      updateStep2({
+        priorityAreas: [...state.step2.priorityAreas, item]
+      });
     }
   };
 
-  const removeFromList = (
-    list: string[],
-    index: number,
-    updateKey: 'innovationWhitespace' | 'priorityAreas'
-  ) => {
-    updateStep2({ [updateKey]: list.filter((_, i) => i !== index) });
+  const selectAll = () => {
+    const allItems = step1Items.map(i => i.value);
+    updateStep2({ priorityAreas: allItems });
   };
+
+  const clearAll = () => {
+    updateStep2({ priorityAreas: [] });
+  };
+
+  // Generate AI analysis based on Step 1 data
+  const generateAnalysis = useCallback(async () => {
+    const settings = loadAPISettings();
+    if (!settings) {
+      setError('Please configure your API key in Step 1 first');
+      return;
+    }
+
+    setIsGenerating(true);
+    setError(null);
+
+    try {
+      const prompt = `You are a competitive intelligence analyst. Based on this research data, provide a detailed IP ontology and whitespace analysis.
+
+Industry: ${state.step1.industry}
+Company: ${state.step1.company}
+
+Research Data:
+- Technical Levers: ${state.step1.technicalLevers.join(', ')}
+- IP Whitespace: ${state.step1.ipWhitespace.join(', ')}
+- Consumer Trends: ${state.step1.consumerTrends.join(', ')}
+- Industry Changes: ${state.step1.industryChanges}
+- Patents: ${state.step1.patents}
+
+Provide analysis in this JSON format only:
+{
+  "ontologyResearchTree": "Detailed hierarchy of technologies and concepts...",
+  "ipCrowdedness": "Analysis of patent density and competitive positioning...",
+  "meceMindmap": "MECE breakdown of the opportunity space...",
+  "e2eEcosystemMap": "End-to-end ecosystem analysis...",
+  "newEntrantAnalysis": "What a disruptive new entrant would do...",
+  "innovationWhitespace": ["whitespace area 1", "whitespace area 2", "whitespace area 3"]
+}`;
+
+      const response = await callAI(prompt, settings);
+
+      updateStep2({
+        ontologyResearchTree: (response.ontologyResearchTree as string) || '',
+        ipCrowdedness: (response.ipCrowdedness as string) || '',
+        meceMindmap: (response.meceMindmap as string) || '',
+        e2eEcosystemMap: (response.e2eEcosystemMap as string) || '',
+        newEntrantAnalysis: (response.newEntrantAnalysis as string) || '',
+        innovationWhitespace: (response.innovationWhitespace as string[]) || [],
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate analysis');
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [state.step1, updateStep2]);
 
   return (
     <div className="step-container">
@@ -44,130 +110,122 @@ export default function Step2() {
       </div>
 
       <div className="step-content">
+        {/* Selection from Step 1 */}
+        {step1Items.length > 0 ? (
+          <div className="form-section selection-section">
+            <div className="section-header-with-actions">
+              <div>
+                <h3>Select Priority Areas from Step 1</h3>
+                <p className="section-desc">Click items to select which areas to prioritize for deeper analysis</p>
+              </div>
+              <div className="selection-actions">
+                <button className="btn-small" onClick={selectAll}>Select All</button>
+                <button className="btn-small btn-outline" onClick={clearAll}>Clear</button>
+              </div>
+            </div>
+
+            <div className="selectable-grid">
+              {step1Items.map((item, i) => (
+                <div
+                  key={i}
+                  className={`selectable-card ${isSelected(item.value) ? 'selected' : ''}`}
+                  onClick={() => toggleSelection(item.value)}
+                >
+                  <span className="card-type">{item.type}</span>
+                  <span className="card-value">{item.value}</span>
+                  <div className="card-checkbox">
+                    {isSelected(item.value) ? '✓' : ''}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="selection-summary">
+              <strong>{state.step2.priorityAreas.length}</strong> of {step1Items.length} items selected
+            </div>
+          </div>
+        ) : (
+          <div className="empty-state">
+            <p>No research data from Step 1. Please go back and generate research first.</p>
+            <button className="btn-secondary" onClick={prevStep}>
+              &larr; Back to Step 1
+            </button>
+          </div>
+        )}
+
+        {/* AI Analysis Section */}
         <div className="form-section">
-          <h3>Analysis Tasks</h3>
-          <p className="section-desc">Zoom into specific areas to elicit insights</p>
+          <h3>AI-Powered Analysis</h3>
+          <p className="section-desc">Generate detailed IP ontology and whitespace analysis based on your selections</p>
 
-          <div className="form-group">
-            <label>Ontology Research Tree</label>
-            <textarea
-              value={state.step2.ontologyResearchTree}
-              onChange={(e) => updateStep2({ ontologyResearchTree: e.target.value })}
-              placeholder="Map out the technology/concept hierarchy and relationships..."
-              rows={4}
-            />
-          </div>
+          {error && <div className="error-message">{error}</div>}
 
-          <div className="form-group">
-            <label>IP Crowdedness Analysis</label>
-            <textarea
-              value={state.step2.ipCrowdedness}
-              onChange={(e) => updateStep2({ ipCrowdedness: e.target.value })}
-              placeholder="Analyze patent density and competition in different areas..."
-              rows={4}
-            />
-          </div>
+          <button
+            className="btn-generate"
+            onClick={generateAnalysis}
+            disabled={isGenerating || state.step2.priorityAreas.length === 0}
+          >
+            {isGenerating ? (
+              <>
+                <span className="spinner"></span>
+                Analyzing...
+              </>
+            ) : (
+              <>Generate IP & Whitespace Analysis</>
+            )}
+          </button>
 
-          <div className="form-group">
-            <label>MECE Mindmap</label>
-            <textarea
-              value={state.step2.meceMindmap}
-              onChange={(e) => updateStep2({ meceMindmap: e.target.value })}
-              placeholder="Mutually Exclusive, Collectively Exhaustive breakdown of the space..."
-              rows={4}
-            />
-          </div>
-
-          <div className="form-group">
-            <label>E2E Ecosystem Map</label>
-            <textarea
-              value={state.step2.e2eEcosystemMap}
-              onChange={(e) => updateStep2({ e2eEcosystemMap: e.target.value })}
-              placeholder="End-to-end ecosystem analysis: suppliers, partners, customers..."
-              rows={4}
-            />
-          </div>
-
-          <div className="form-group">
-            <label>What Would a New Entrant Do?</label>
-            <textarea
-              value={state.step2.newEntrantAnalysis}
-              onChange={(e) => updateStep2({ newEntrantAnalysis: e.target.value })}
-              placeholder="If a new player entered this space, what approach would they take?"
-              rows={4}
-            />
-          </div>
+          {state.step2.priorityAreas.length === 0 && (
+            <p className="hint-text">Select at least one item above to enable analysis</p>
+          )}
         </div>
 
-        <div className="form-section output-section">
-          <h3>Outputs</h3>
-          <p className="section-desc">Innovation white space for internal prioritization</p>
+        {/* Analysis Results */}
+        {(state.step2.ontologyResearchTree || state.step2.innovationWhitespace.length > 0) && (
+          <div className="form-section results-section">
+            <h3>Analysis Results</h3>
 
-          <div className="list-input-group">
-            <label>Innovation Whitespace Areas</label>
-            <div className="list-input">
-              <input
-                type="text"
-                value={newWhitespace}
-                onChange={(e) => setNewWhitespace(e.target.value)}
-                placeholder="Add innovation whitespace area..."
-                onKeyPress={(e) => e.key === 'Enter' && addToList(state.step2.innovationWhitespace, newWhitespace, setNewWhitespace, 'innovationWhitespace')}
-              />
-              <button onClick={() => addToList(state.step2.innovationWhitespace, newWhitespace, setNewWhitespace, 'innovationWhitespace')}>Add</button>
-            </div>
-            <ul className="tag-list">
-              {state.step2.innovationWhitespace.map((item, i) => (
-                <li key={i} className="tag">
-                  {item}
-                  <button onClick={() => removeFromList(state.step2.innovationWhitespace, i, 'innovationWhitespace')}>&times;</button>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="list-input-group">
-            <label>Priority Areas for Internal Review</label>
-            <div className="list-input">
-              <input
-                type="text"
-                value={newPriority}
-                onChange={(e) => setNewPriority(e.target.value)}
-                placeholder="Add priority area..."
-                onKeyPress={(e) => e.key === 'Enter' && addToList(state.step2.priorityAreas, newPriority, setNewPriority, 'priorityAreas')}
-              />
-              <button onClick={() => addToList(state.step2.priorityAreas, newPriority, setNewPriority, 'priorityAreas')}>Add</button>
-            </div>
-            <ul className="tag-list">
-              {state.step2.priorityAreas.map((item, i) => (
-                <li key={i} className="tag tag-priority">
-                  {item}
-                  <button onClick={() => removeFromList(state.step2.priorityAreas, i, 'priorityAreas')}>&times;</button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-
-        {/* Show data from Step 1 for reference */}
-        {(state.step1.ipWhitespace.length > 0 || state.step1.technicalLevers.length > 0) && (
-          <div className="form-section reference-section">
-            <h3>Reference from Step 1</h3>
-            {state.step1.ipWhitespace.length > 0 && (
-              <div className="reference-list">
-                <strong>IP Whitespace:</strong>
-                <ul className="tag-list">
-                  {state.step1.ipWhitespace.map((item, i) => (
-                    <li key={i} className="tag tag-reference">{item}</li>
-                  ))}
-                </ul>
+            {state.step2.ontologyResearchTree && (
+              <div className="result-card">
+                <h4>Ontology Research Tree</h4>
+                <p>{state.step2.ontologyResearchTree}</p>
               </div>
             )}
-            {state.step1.technicalLevers.length > 0 && (
-              <div className="reference-list">
-                <strong>Technical Levers:</strong>
-                <ul className="tag-list">
-                  {state.step1.technicalLevers.map((item, i) => (
-                    <li key={i} className="tag tag-reference">{item}</li>
+
+            {state.step2.ipCrowdedness && (
+              <div className="result-card">
+                <h4>IP Crowdedness</h4>
+                <p>{state.step2.ipCrowdedness}</p>
+              </div>
+            )}
+
+            {state.step2.meceMindmap && (
+              <div className="result-card">
+                <h4>MECE Mindmap</h4>
+                <p>{state.step2.meceMindmap}</p>
+              </div>
+            )}
+
+            {state.step2.e2eEcosystemMap && (
+              <div className="result-card">
+                <h4>E2E Ecosystem Map</h4>
+                <p>{state.step2.e2eEcosystemMap}</p>
+              </div>
+            )}
+
+            {state.step2.newEntrantAnalysis && (
+              <div className="result-card">
+                <h4>New Entrant Analysis</h4>
+                <p>{state.step2.newEntrantAnalysis}</p>
+              </div>
+            )}
+
+            {state.step2.innovationWhitespace.length > 0 && (
+              <div className="result-card">
+                <h4>Innovation Whitespace Areas</h4>
+                <ul className="result-list">
+                  {state.step2.innovationWhitespace.map((item, i) => (
+                    <li key={i}>{item}</li>
                   ))}
                 </ul>
               </div>
@@ -186,4 +244,54 @@ export default function Step2() {
       </div>
     </div>
   );
+}
+
+// Helper function to call AI
+async function callAI(prompt: string, settings: APISettings): Promise<Record<string, unknown>> {
+  const isClause = settings.provider === 'claude';
+
+  const url = isClause
+    ? 'https://api.anthropic.com/v1/messages'
+    : 'https://api.openai.com/v1/chat/completions';
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (isClause) {
+    headers['x-api-key'] = settings.apiKey;
+    headers['anthropic-version'] = '2023-06-01';
+    headers['anthropic-dangerous-direct-browser-access'] = 'true';
+  } else {
+    headers['Authorization'] = `Bearer ${settings.apiKey}`;
+  }
+
+  const body = isClause
+    ? JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 4096,
+        messages: [{ role: 'user', content: prompt }],
+      })
+    : JSON.stringify({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 4096,
+      });
+
+  const response = await fetch(url, { method: 'POST', headers, body });
+
+  if (!response.ok) {
+    throw new Error(`API error: ${await response.text()}`);
+  }
+
+  const data = await response.json();
+  const content = isClause
+    ? data.content[0].text
+    : data.choices[0].message.content;
+
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    return JSON.parse(jsonMatch[0]);
+  }
+  throw new Error('Failed to parse AI response');
 }
