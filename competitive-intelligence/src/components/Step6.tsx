@@ -1,138 +1,141 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useWorkflow } from '../context/WorkflowContext';
 import { STEPS_INFO } from '../types/workflow';
+import { loadAPISettings } from '../services/aiResearch';
+import { callAI } from '../services/callAI';
 
 export default function Step6() {
   const { state, updateStep6, prevStep, reset } = useWorkflow();
   const stepInfo = STEPS_INFO[5];
 
-  const [newInsight, setNewInsight] = useState('');
-  const [newReco, setNewReco] = useState('');
-  const [newStep, setNewStep] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const addToList = (
-    list: string[],
-    value: string,
-    setter: (v: string) => void,
-    updateKey: 'insights' | 'recommendations' | 'nextSteps'
-  ) => {
-    if (value.trim()) {
-      updateStep6({ [updateKey]: [...list, value.trim()] });
-      setter('');
+  const generateStrategy = useCallback(async () => {
+    const settings = loadAPISettings();
+    if (!settings) {
+      setError('Please configure your API key in Step 1 first');
+      return;
     }
-  };
 
-  const removeFromList = (
-    list: string[],
-    index: number,
-    updateKey: 'insights' | 'recommendations' | 'nextSteps'
-  ) => {
-    updateStep6({ [updateKey]: list.filter((_, i) => i !== index) });
-  };
+    setIsGenerating(true);
+    setError(null);
+
+    try {
+      const prompt = `You are a competitive intelligence strategist creating a final strategy and recommendations presentation using the What / So What / Now What framework.
+
+Industry: ${state.step1.industry}
+Company: ${state.step1.company}
+
+Executive Summary: ${state.step5.executiveSummary}
+Technical Roadmap: ${state.step5.technicalRoadmap}
+Recommendations from analysis: ${state.step5.recommendations.join('; ')}
+
+Opportunities:
+${state.step4.opportunities.map(o => `- ${o.name}: TRL ${o.techReadinessLevel}, Prize: ${o.sizeOfPrize}`).join('\n')}
+
+Comparison Matrix:
+${state.step5.comparisonMatrix.map(m => `- ${m.option}: Feasibility ${m.feasibility}, Impact ${m.impact}, Priority ${m.priority}`).join('\n')}
+
+Provide final strategy in this JSON format only:
+{
+  "insights": ["Key insight 1", "Key insight 2", "Key insight 3", "Key insight 4", "Key insight 5"],
+  "strategy": "Overall strategic recommendation...",
+  "recommendations": ["Specific recommendation 1", "Specific recommendation 2", "Specific recommendation 3"],
+  "nextSteps": ["Immediate action 1", "Immediate action 2", "Immediate action 3", "Immediate action 4"],
+  "presentationNotes": "Key talking points for stakeholder presentation..."
+}`;
+
+      const response = await callAI(prompt, settings);
+
+      updateStep6({
+        insights: (response.insights as string[]) || [],
+        strategy: (response.strategy as string) || '',
+        recommendations: (response.recommendations as string[]) || [],
+        nextSteps: (response.nextSteps as string[]) || [],
+        presentationNotes: (response.presentationNotes as string) || '',
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate strategy');
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [state.step1, state.step4, state.step5, updateStep6]);
+
+  const hasResults = state.step6.insights.length > 0 || state.step6.strategy;
 
   const exportReport = () => {
-    const report = generateReport();
-    const blob = new Blob([report], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `competitive-intelligence-report-${new Date().toISOString().split('T')[0]}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const generateReport = () => {
-    return `# Competitive Intelligence Report
+    const report = `# Competitive Intelligence Report
 ## ${state.step1.industry} - ${state.step1.company}
 Generated: ${new Date().toLocaleDateString()}
 
 ---
 
 ## Executive Summary
-${state.step5.executiveSummary || 'No executive summary provided.'}
+${state.step5.executiveSummary || 'Not generated'}
 
 ---
 
 ## Phase 1: Strategy Development
 
-### Category Landscape & Whitespace
-
-**Industry Changes:**
-${state.step1.industryChanges || 'Not documented'}
-
-**Technical Levers:**
-${state.step1.technicalLevers.map(l => `- ${l}`).join('\n') || '- None identified'}
-
-**IP Whitespace:**
-${state.step1.ipWhitespace.map(w => `- ${w}`).join('\n') || '- None identified'}
-
-**Consumer Trends:**
-${state.step1.consumerTrends.map(t => `- ${t}`).join('\n') || '- None identified'}
-
-### IP Ontology Analysis
-
-**Innovation Whitespace:**
-${state.step2.innovationWhitespace.map(w => `- ${w}`).join('\n') || '- None identified'}
-
-**Priority Areas:**
-${state.step2.priorityAreas.map(p => `- ${p}`).join('\n') || '- None identified'}
+### Category Landscape
+**Technical Levers:** ${state.step1.technicalLevers.join(', ') || 'None'}
+**IP Whitespace:** ${state.step1.ipWhitespace.join(', ') || 'None'}
+**Consumer Trends:** ${state.step1.consumerTrends.join(', ') || 'None'}
 
 ### RRW Analysis
-
-**Is It Real?**
-${state.step3.rrwAnalysis.isItReal || 'Not assessed'}
-
-**Can We Win?**
-${state.step3.rrwAnalysis.canWeWin || 'Not assessed'}
-
-**Is It Worth It?**
-${state.step3.rrwAnalysis.isItWorthIt || 'Not assessed'}
+- **Is It Real?** ${state.step3.rrwAnalysis.isItReal || 'N/A'}
+- **Can We Win?** ${state.step3.rrwAnalysis.canWeWin || 'N/A'}
+- **Is It Worth It?** ${state.step3.rrwAnalysis.isItWorthIt || 'N/A'}
 
 ---
 
 ## Phase 2: Technical Plan
 
-### Selected Opportunities
-
+### Opportunities Deep Dive
 ${state.step4.opportunities.map(opp => `
 #### ${opp.name}
-- **JTBD Alignment:** ${opp.jtbdAlignment || 'Not documented'}
-- **Tech Readiness Level:** TRL ${opp.techReadinessLevel}
-- **Size of Prize:** ${opp.sizeOfPrize || 'Not estimated'}
-- **Consumer Needs:** ${opp.consumerNeeds.join(', ') || 'None listed'}
-`).join('\n') || 'No opportunities analyzed'}
+- **TRL:** ${opp.techReadinessLevel}
+- **JTBD:** ${opp.jtbdAlignment}
+- **Size of Prize:** ${opp.sizeOfPrize}
+- **Consumer Needs:** ${opp.consumerNeeds.join(', ')}
+`).join('\n')}
 
 ### Comparison Matrix
-
 | Option | Feasibility | Impact | Effort | Priority |
 |--------|-------------|--------|--------|----------|
-${state.step5.comparisonMatrix.map(item =>
-  `| ${item.option} | ${item.feasibility}/10 | ${item.impact}/10 | ${item.effort}/10 | ${item.priority.toUpperCase()} |`
-).join('\n') || '| No options compared | - | - | - | - |'}
+${state.step5.comparisonMatrix.map(m => `| ${m.option} | ${m.feasibility}/10 | ${m.impact}/10 | ${m.effort}/10 | ${m.priority.toUpperCase()} |`).join('\n')}
 
 ### Technical Roadmap
-${state.step5.technicalRoadmap || 'No roadmap defined'}
+${state.step5.technicalRoadmap || 'Not generated'}
 
 ---
 
 ## Strategy & Recommendations
 
-### Key Insights
-${state.step6.insights.map((i, idx) => `${idx + 1}. ${i}`).join('\n') || 'No insights documented'}
+### WHAT: Key Insights
+${state.step6.insights.map((i, idx) => `${idx + 1}. ${i}`).join('\n')}
 
-### Strategy
-${state.step6.strategy || 'No strategy defined'}
+### SO WHAT: Strategy
+${state.step6.strategy || 'Not generated'}
 
-### Recommendations
-${state.step6.recommendations.map((r, idx) => `${idx + 1}. ${r}`).join('\n') || 'No recommendations'}
+### SO WHAT: Recommendations
+${state.step6.recommendations.map((r, idx) => `${idx + 1}. ${r}`).join('\n')}
 
-### Next Steps
-${state.step6.nextSteps.map((s, idx) => `${idx + 1}. ${s}`).join('\n') || 'No next steps defined'}
+### NOW WHAT: Next Steps
+${state.step6.nextSteps.map((s, idx) => `${idx + 1}. ${s}`).join('\n')}
 
 ---
-
 *Report generated using the Agent-Powered Tech Competitive Intelligence Workflow*
 `;
+
+    const blob = new Blob([report], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ci-report-${state.step1.industry.replace(/\s+/g, '-').toLowerCase()}-${new Date().toISOString().split('T')[0]}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -142,11 +145,6 @@ ${state.step6.nextSteps.map((s, idx) => `${idx + 1}. ${s}`).join('\n') || 'No ne
         <h2>Step {stepInfo.number}: {stepInfo.title}</h2>
         <div className="step-meta">
           <span className="tool-badge">Tool: {stepInfo.tool}</span>
-          {stepInfo.guardrails.length > 0 && (
-            <div className="guardrails">
-              <strong>Guardrails:</strong> {stepInfo.guardrails.join(', ')}
-            </div>
-          )}
         </div>
       </div>
 
@@ -155,120 +153,91 @@ ${state.step6.nextSteps.map((s, idx) => `${idx + 1}. ${s}`).join('\n') || 'No ne
           <h3>Communication Framework: What, So What, Now What</h3>
         </div>
 
+        {/* Generate */}
         <div className="form-section">
-          <h3>WHAT: Key Insights</h3>
-          <p className="section-desc">What did we learn from the research?</p>
-          <div className="list-input-group">
-            <div className="list-input">
-              <input
-                type="text"
-                value={newInsight}
-                onChange={(e) => setNewInsight(e.target.value)}
-                placeholder="Add a key insight..."
-                onKeyPress={(e) => e.key === 'Enter' && addToList(state.step6.insights, newInsight, setNewInsight, 'insights')}
-              />
-              <button onClick={() => addToList(state.step6.insights, newInsight, setNewInsight, 'insights')}>Add</button>
-            </div>
-            <ol className="numbered-list">
-              {state.step6.insights.map((item, i) => (
-                <li key={i}>
-                  <span>{item}</span>
-                  <button className="remove-btn" onClick={() => removeFromList(state.step6.insights, i, 'insights')}>&times;</button>
-                </li>
-              ))}
-            </ol>
-          </div>
-        </div>
-
-        <div className="form-section">
-          <h3>SO WHAT: Strategy</h3>
-          <p className="section-desc">Why does this matter? What's our strategic response?</p>
-          <div className="form-group">
-            <textarea
-              value={state.step6.strategy}
-              onChange={(e) => updateStep6({ strategy: e.target.value })}
-              placeholder="Define the overall strategy based on the insights..."
-              rows={5}
-            />
-          </div>
-        </div>
-
-        <div className="form-section">
-          <h3>SO WHAT: Recommendations</h3>
-          <div className="list-input-group">
-            <div className="list-input">
-              <input
-                type="text"
-                value={newReco}
-                onChange={(e) => setNewReco(e.target.value)}
-                placeholder="Add a recommendation..."
-                onKeyPress={(e) => e.key === 'Enter' && addToList(state.step6.recommendations, newReco, setNewReco, 'recommendations')}
-              />
-              <button onClick={() => addToList(state.step6.recommendations, newReco, setNewReco, 'recommendations')}>Add</button>
-            </div>
-            <ol className="numbered-list">
-              {state.step6.recommendations.map((item, i) => (
-                <li key={i}>
-                  <span>{item}</span>
-                  <button className="remove-btn" onClick={() => removeFromList(state.step6.recommendations, i, 'recommendations')}>&times;</button>
-                </li>
-              ))}
-            </ol>
-          </div>
-        </div>
-
-        <div className="form-section">
-          <h3>NOW WHAT: Next Steps</h3>
-          <p className="section-desc">What actions should be taken?</p>
-          <div className="list-input-group">
-            <div className="list-input">
-              <input
-                type="text"
-                value={newStep}
-                onChange={(e) => setNewStep(e.target.value)}
-                placeholder="Add a next step..."
-                onKeyPress={(e) => e.key === 'Enter' && addToList(state.step6.nextSteps, newStep, setNewStep, 'nextSteps')}
-              />
-              <button onClick={() => addToList(state.step6.nextSteps, newStep, setNewStep, 'nextSteps')}>Add</button>
-            </div>
-            <ol className="numbered-list action-list">
-              {state.step6.nextSteps.map((item, i) => (
-                <li key={i}>
-                  <span>{item}</span>
-                  <button className="remove-btn" onClick={() => removeFromList(state.step6.nextSteps, i, 'nextSteps')}>&times;</button>
-                </li>
-              ))}
-            </ol>
-          </div>
-        </div>
-
-        <div className="form-section">
-          <h3>Presentation Notes</h3>
-          <div className="form-group">
-            <textarea
-              value={state.step6.presentationNotes}
-              onChange={(e) => updateStep6({ presentationNotes: e.target.value })}
-              placeholder="Additional notes for the presentation deck..."
-              rows={4}
-            />
-          </div>
-        </div>
-
-        <div className="export-section">
-          <h3>Export Report</h3>
-          <p>Generate a markdown report with all findings</p>
-          <button className="btn-export" onClick={exportReport}>
-            Download Report (Markdown)
+          <h3>Generate Final Strategy</h3>
+          <p className="section-desc">AI will create insights, strategy, recommendations, and next steps from all your research</p>
+          {error && <div className="error-message">{error}</div>}
+          <button
+            className="btn-generate"
+            onClick={generateStrategy}
+            disabled={isGenerating}
+          >
+            {isGenerating ? (
+              <><span className="spinner"></span>Generating Strategy...</>
+            ) : (
+              <>Generate Strategy & Recommendations</>
+            )}
           </button>
         </div>
+
+        {/* Results */}
+        {hasResults && (
+          <>
+            <div className="form-section results-section">
+              <h3>WHAT: Key Insights</h3>
+              {state.step6.insights.map((insight, i) => (
+                <div key={i} className="result-card">
+                  <p><strong>{i + 1}.</strong> {insight}</p>
+                </div>
+              ))}
+            </div>
+
+            {state.step6.strategy && (
+              <div className="form-section results-section">
+                <h3>SO WHAT: Strategy</h3>
+                <div className="result-card">
+                  <p>{state.step6.strategy}</p>
+                </div>
+              </div>
+            )}
+
+            {state.step6.recommendations.length > 0 && (
+              <div className="form-section results-section">
+                <h3>SO WHAT: Recommendations</h3>
+                {state.step6.recommendations.map((reco, i) => (
+                  <div key={i} className="result-card">
+                    <p><strong>{i + 1}.</strong> {reco}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {state.step6.nextSteps.length > 0 && (
+              <div className="form-section results-section">
+                <h3>NOW WHAT: Next Steps</h3>
+                {state.step6.nextSteps.map((step, i) => (
+                  <div key={i} className="result-card">
+                    <p><strong>{i + 1}.</strong> {step}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {state.step6.presentationNotes && (
+              <div className="form-section">
+                <div className="result-card">
+                  <h4>Presentation Notes</h4>
+                  <p>{state.step6.presentationNotes}</p>
+                </div>
+              </div>
+            )}
+
+            <div className="export-section">
+              <h3>Export Report</h3>
+              <p>Download a complete Markdown report with all findings from every step</p>
+              <button className="btn-export" onClick={exportReport}>
+                Download Full Report
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="step-actions">
-        <button className="btn-secondary" onClick={prevStep}>
-          &larr; Back to Step 5
-        </button>
+        <button className="btn-secondary" onClick={prevStep}>&larr; Back to Step 5</button>
         <button className="btn-reset" onClick={() => {
-          if (confirm('Are you sure you want to start over? All data will be lost.')) {
+          if (confirm('Start a new workflow? All data will be cleared.')) {
             reset();
           }
         }}>

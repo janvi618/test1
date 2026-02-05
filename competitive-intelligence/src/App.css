@@ -1328,3 +1328,116 @@ body {
   color: var(--text-secondary);
   margin-bottom: 0.25rem;
 }
+
+/* RRW Results Grid (Steps 3 & 4) */
+.rrw-results {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.rrw-result-real {
+  border-left: 4px solid var(--success-color);
+}
+
+.rrw-result-real h4 {
+  color: var(--success-color);
+}
+
+.rrw-result-win {
+  border-left: 4px solid var(--phase1-color);
+}
+
+.rrw-result-win h4 {
+  color: var(--phase1-color);
+}
+
+.rrw-result-worth {
+  border-left: 4px solid var(--phase2-color);
+}
+
+.rrw-result-worth h4 {
+  color: var(--phase2-color);
+}
+
+/* TRL Inline Display (Step 4) */
+.trl-display-inline {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.trl-display-inline .trl-value {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--phase2-color);
+  white-space: nowrap;
+}
+
+.trl-bar {
+  flex: 1;
+  height: 10px;
+  background: var(--border-color);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.trl-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--phase1-color), var(--phase2-color));
+  border-radius: 5px;
+  transition: width 0.3s ease;
+}
+
+/* Opportunity Results (Step 4) */
+.opportunity-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* Synthesis Summary Grid (Step 5) */
+.synthesis-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.synthesis-card {
+  background: var(--card-bg);
+  padding: 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  text-align: center;
+}
+
+.synthesis-label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}
+
+.synthesis-value {
+  display: block;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+@media (max-width: 1024px) {
+  .rrw-results {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .synthesis-summary-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}

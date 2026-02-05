@@ -1,10 +1,8 @@
 import { useState, useCallback } from 'react';
 import { useWorkflow } from '../context/WorkflowContext';
 import { STEPS_INFO } from '../types/workflow';
-import {
-  loadAPISettings,
-  type APISettings,
-} from '../services/aiResearch';
+import { loadAPISettings } from '../services/aiResearch';
+import { callAI } from '../services/callAI';
 
 export default function Step2() {
   const { state, updateStep2, nextStep, prevStep } = useWorkflow();
@@ -246,52 +244,3 @@ Provide analysis in this JSON format only:
   );
 }
 
-// Helper function to call AI
-async function callAI(prompt: string, settings: APISettings): Promise<Record<string, unknown>> {
-  const isClause = settings.provider === 'claude';
-
-  const url = isClause
-    ? 'https://api.anthropic.com/v1/messages'
-    : 'https://api.openai.com/v1/chat/completions';
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-
-  if (isClause) {
-    headers['x-api-key'] = settings.apiKey;
-    headers['anthropic-version'] = '2023-06-01';
-    headers['anthropic-dangerous-direct-browser-access'] = 'true';
-  } else {
-    headers['Authorization'] = `Bearer ${settings.apiKey}`;
-  }
-
-  const body = isClause
-    ? JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 4096,
-        messages: [{ role: 'user', content: prompt }],
-      })
-    : JSON.stringify({
-        model: 'gpt-4o',
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 4096,
-      });
-
-  const response = await fetch(url, { method: 'POST', headers, body });
-
-  if (!response.ok) {
-    throw new Error(`API error: ${await response.text()}`);
-  }
-
-  const data = await response.json();
-  const content = isClause
-    ? data.content[0].text
-    : data.choices[0].message.content;
-
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    return JSON.parse(jsonMatch[0]);
-  }
-  throw new Error('Failed to parse AI response');
-}

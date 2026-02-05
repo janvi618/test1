@@ -1,35 +1,100 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useWorkflow } from '../context/WorkflowContext';
 import { STEPS_INFO } from '../types/workflow';
+import { loadAPISettings } from '../services/aiResearch';
+import { callAI } from '../services/callAI';
 
 export default function Step3() {
   const { state, updateStep3, nextStep, prevStep } = useWorkflow();
   const stepInfo = STEPS_INFO[2];
-  const [newOpportunity, setNewOpportunity] = useState('');
 
-  const addOpportunity = () => {
-    if (newOpportunity.trim()) {
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Items from Step 2 for selection as opportunities
+  const step2Items = [
+    ...state.step2.innovationWhitespace.map(item => ({ type: 'Innovation Whitespace', value: item })),
+    ...state.step2.priorityAreas.map(item => ({ type: 'Priority Area', value: item })),
+  ];
+
+  const isSelected = (item: string) => state.step3.selectedOpportunities.includes(item);
+
+  const toggleSelection = (item: string) => {
+    if (isSelected(item)) {
       updateStep3({
-        selectedOpportunities: [...state.step3.selectedOpportunities, newOpportunity.trim()],
+        selectedOpportunities: state.step3.selectedOpportunities.filter(i => i !== item),
       });
-      setNewOpportunity('');
+    } else {
+      updateStep3({
+        selectedOpportunities: [...state.step3.selectedOpportunities, item],
+      });
     }
   };
 
-  const removeOpportunity = (index: number) => {
-    updateStep3({
-      selectedOpportunities: state.step3.selectedOpportunities.filter((_, i) => i !== index),
-    });
+  const selectAll = () => {
+    updateStep3({ selectedOpportunities: step2Items.map(i => i.value) });
   };
 
-  const updateRRW = (field: 'isItReal' | 'canWeWin' | 'isItWorthIt', value: string) => {
-    updateStep3({
-      rrwAnalysis: {
-        ...state.step3.rrwAnalysis,
-        [field]: value,
-      },
-    });
+  const clearAll = () => {
+    updateStep3({ selectedOpportunities: [] });
   };
+
+  const generateStrategy = useCallback(async () => {
+    const settings = loadAPISettings();
+    if (!settings) {
+      setError('Please configure your API key in Step 1 first');
+      return;
+    }
+
+    setIsGenerating(true);
+    setError(null);
+
+    try {
+      const prompt = `You are a competitive intelligence strategist. Based on the selected opportunities, perform an RRW (Real-Win-Worth) analysis and develop a business fit strategy.
+
+Industry: ${state.step1.industry}
+Company: ${state.step1.company}
+
+Selected Opportunities:
+${state.step3.selectedOpportunities.map((o, i) => `${i + 1}. ${o}`).join('\n')}
+
+Context from research:
+- Industry Changes: ${state.step1.industryChanges}
+- IP Analysis: ${state.step2.ipCrowdedness}
+- Ecosystem Map: ${state.step2.e2eEcosystemMap}
+
+Provide analysis in this JSON format only:
+{
+  "fitAnalysis": "How these opportunities align with organizational capabilities...",
+  "isItReal": "Market reality and technical feasibility assessment...",
+  "canWeWin": "Competitive advantage and capabilities assessment...",
+  "isItWorthIt": "Financial viability and strategic value assessment...",
+  "newEntrantStrategy": "What a disruptive new entrant would do...",
+  "internalStrategy": "Recommended internal strategy...",
+  "teamAlignment": "Key stakeholders and alignment needed..."
+}`;
+
+      const response = await callAI(prompt, settings);
+
+      updateStep3({
+        fitAnalysis: (response.fitAnalysis as string) || '',
+        rrwAnalysis: {
+          isItReal: (response.isItReal as string) || '',
+          canWeWin: (response.canWeWin as string) || '',
+          isItWorthIt: (response.isItWorthIt as string) || '',
+        },
+        newEntrantStrategy: (response.newEntrantStrategy as string) || '',
+        internalStrategy: (response.internalStrategy as string) || '',
+        teamAlignment: (response.teamAlignment as string) || '',
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate strategy');
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [state.step1, state.step2, state.step3.selectedOpportunities, updateStep3]);
+
+  const hasResults = state.step3.fitAnalysis || state.step3.rrwAnalysis.isItReal;
 
   return (
     <div className="step-container">
@@ -38,156 +103,104 @@ export default function Step3() {
         <h2>Step {stepInfo.number}: {stepInfo.title}</h2>
         <div className="step-meta">
           <span className="tool-badge">Tool: {stepInfo.tool}</span>
-          {stepInfo.guardrails.length > 0 && (
-            <div className="guardrails">
-              <strong>Guardrails:</strong> {stepInfo.guardrails.join(', ')}
-            </div>
-          )}
         </div>
       </div>
 
       <div className="step-content">
-        <div className="form-section">
-          <h3>Fit Analysis</h3>
-          <div className="form-group">
-            <label>Strategic Fit Assessment</label>
-            <textarea
-              value={state.step3.fitAnalysis}
-              onChange={(e) => updateStep3({ fitAnalysis: e.target.value })}
-              placeholder="How do the identified opportunities align with your organization's capabilities and goals?"
-              rows={4}
-            />
-          </div>
-        </div>
-
-        <div className="form-section">
-          <h3>RRW Analysis (Real-Win-Worth)</h3>
-          <p className="section-desc">Evaluate each opportunity using the RRW framework</p>
-
-          <div className="rrw-grid">
-            <div className="rrw-card real">
-              <h4>Is It Real?</h4>
-              <p className="rrw-desc">Market reality & technical feasibility</p>
-              <textarea
-                value={state.step3.rrwAnalysis.isItReal}
-                onChange={(e) => updateRRW('isItReal', e.target.value)}
-                placeholder="Is the market real? Is the product real? Can we build it?"
-                rows={4}
-              />
+        {step2Items.length > 0 ? (
+          <div className="form-section selection-section">
+            <div className="section-header-with-actions">
+              <div>
+                <h3>Select Opportunities to Evaluate</h3>
+                <p className="section-desc">Choose which items to run through RRW (Real-Win-Worth) analysis</p>
+              </div>
+              <div className="selection-actions">
+                <button className="btn-small" onClick={selectAll}>Select All</button>
+                <button className="btn-small btn-outline" onClick={clearAll}>Clear</button>
+              </div>
             </div>
 
-            <div className="rrw-card win">
-              <h4>Can We Win?</h4>
-              <p className="rrw-desc">Competitive advantage & capabilities</p>
-              <textarea
-                value={state.step3.rrwAnalysis.canWeWin}
-                onChange={(e) => updateRRW('canWeWin', e.target.value)}
-                placeholder="Do we have competitive advantage? Can we sustain it? What's our position?"
-                rows={4}
-              />
-            </div>
-
-            <div className="rrw-card worth">
-              <h4>Is It Worth It?</h4>
-              <p className="rrw-desc">Financial viability & strategic value</p>
-              <textarea
-                value={state.step3.rrwAnalysis.isItWorthIt}
-                onChange={(e) => updateRRW('isItWorthIt', e.target.value)}
-                placeholder="Will it be profitable? Does it fit our strategy? Is the risk acceptable?"
-                rows={4}
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="form-section">
-          <h3>New Entrant Strategy</h3>
-          <div className="form-group">
-            <label>What Would a New Entrant Do?</label>
-            <textarea
-              value={state.step3.newEntrantStrategy}
-              onChange={(e) => updateStep3({ newEntrantStrategy: e.target.value })}
-              placeholder="Consider the approach a disruptive new entrant might take..."
-              rows={4}
-            />
-          </div>
-        </div>
-
-        <div className="form-section output-section">
-          <h3>Selected Opportunities for Phase 2</h3>
-          <p className="section-desc">Narrow down to specific opportunities for deep dive analysis</p>
-
-          <div className="list-input-group">
-            <label>Opportunities to Pursue</label>
-            <div className="list-input">
-              <input
-                type="text"
-                value={newOpportunity}
-                onChange={(e) => setNewOpportunity(e.target.value)}
-                placeholder="Add an opportunity to pursue in Phase 2..."
-                onKeyPress={(e) => e.key === 'Enter' && addOpportunity()}
-              />
-              <button onClick={addOpportunity}>Add</button>
-            </div>
-            <ul className="opportunity-list">
-              {state.step3.selectedOpportunities.map((opp, i) => (
-                <li key={i} className="opportunity-item">
-                  <span className="opportunity-number">{i + 1}</span>
-                  <span className="opportunity-text">{opp}</span>
-                  <button className="remove-btn" onClick={() => removeOpportunity(i)}>&times;</button>
-                </li>
+            <div className="selectable-grid">
+              {step2Items.map((item, i) => (
+                <div
+                  key={i}
+                  className={`selectable-card ${isSelected(item.value) ? 'selected' : ''}`}
+                  onClick={() => toggleSelection(item.value)}
+                >
+                  <span className="card-type">{item.type}</span>
+                  <span className="card-value">{item.value}</span>
+                  <div className="card-checkbox">{isSelected(item.value) ? '✓' : ''}</div>
+                </div>
               ))}
-            </ul>
+            </div>
+
+            <div className="selection-summary">
+              <strong>{state.step3.selectedOpportunities.length}</strong> of {step2Items.length} items selected
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="empty-state">
+            <p>No data from Step 2. Go back and complete the previous step.</p>
+            <button className="btn-secondary" onClick={prevStep}>&larr; Back to Step 2</button>
+          </div>
+        )}
 
         <div className="form-section">
-          <h3>Team Alignment</h3>
-          <div className="form-row">
-            <div className="form-group">
-              <label>Internal Strategy Notes</label>
-              <textarea
-                value={state.step3.internalStrategy}
-                onChange={(e) => updateStep3({ internalStrategy: e.target.value })}
-                placeholder="Document the internal strategy decisions..."
-                rows={4}
-              />
-            </div>
-            <div className="form-group">
-              <label>Team Alignment Status</label>
-              <textarea
-                value={state.step3.teamAlignment}
-                onChange={(e) => updateStep3({ teamAlignment: e.target.value })}
-                placeholder="Document team alignment and stakeholder buy-in..."
-                rows={4}
-              />
-            </div>
-          </div>
+          <h3>AI-Powered Strategy Analysis</h3>
+          <p className="section-desc">Generate RRW analysis and business fit strategy</p>
+          {error && <div className="error-message">{error}</div>}
+          <button
+            className="btn-generate"
+            onClick={generateStrategy}
+            disabled={isGenerating || state.step3.selectedOpportunities.length === 0}
+          >
+            {isGenerating ? (
+              <><span className="spinner"></span>Generating Strategy...</>
+            ) : (
+              <>Generate RRW & Strategy Analysis</>
+            )}
+          </button>
+          {state.step3.selectedOpportunities.length === 0 && (
+            <p className="hint-text">Select at least one opportunity above</p>
+          )}
         </div>
 
-        {/* Reference from Step 2 */}
-        {state.step2.priorityAreas.length > 0 && (
-          <div className="form-section reference-section">
-            <h3>Reference from Step 2</h3>
-            <div className="reference-list">
-              <strong>Priority Areas:</strong>
-              <ul className="tag-list">
-                {state.step2.priorityAreas.map((item, i) => (
-                  <li key={i} className="tag tag-reference">{item}</li>
-                ))}
-              </ul>
+        {hasResults && (
+          <div className="form-section results-section">
+            <h3>Strategy Analysis Results</h3>
+
+            {state.step3.fitAnalysis && (
+              <div className="result-card"><h4>Strategic Fit Assessment</h4><p>{state.step3.fitAnalysis}</p></div>
+            )}
+
+            <div className="rrw-results">
+              {state.step3.rrwAnalysis.isItReal && (
+                <div className="result-card rrw-result-real"><h4>Is It Real?</h4><p>{state.step3.rrwAnalysis.isItReal}</p></div>
+              )}
+              {state.step3.rrwAnalysis.canWeWin && (
+                <div className="result-card rrw-result-win"><h4>Can We Win?</h4><p>{state.step3.rrwAnalysis.canWeWin}</p></div>
+              )}
+              {state.step3.rrwAnalysis.isItWorthIt && (
+                <div className="result-card rrw-result-worth"><h4>Is It Worth It?</h4><p>{state.step3.rrwAnalysis.isItWorthIt}</p></div>
+              )}
             </div>
+
+            {state.step3.newEntrantStrategy && (
+              <div className="result-card"><h4>New Entrant Strategy</h4><p>{state.step3.newEntrantStrategy}</p></div>
+            )}
+            {state.step3.internalStrategy && (
+              <div className="result-card"><h4>Internal Strategy</h4><p>{state.step3.internalStrategy}</p></div>
+            )}
+            {state.step3.teamAlignment && (
+              <div className="result-card"><h4>Team Alignment</h4><p>{state.step3.teamAlignment}</p></div>
+            )}
           </div>
         )}
       </div>
 
       <div className="step-actions">
-        <button className="btn-secondary" onClick={prevStep}>
-          &larr; Back to Step 2
-        </button>
-        <button className="btn-primary" onClick={nextStep}>
-          Continue to Phase 2 &rarr;
-        </button>
+        <button className="btn-secondary" onClick={prevStep}>&larr; Back to Step 2</button>
+        <button className="btn-primary" onClick={nextStep}>Continue to Phase 2 &rarr;</button>
       </div>
     </div>
   );
